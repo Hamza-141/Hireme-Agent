@@ -47,12 +47,17 @@ TOOL_DEFINITIONS = [
     }
 ]
 
-def execute_tool(tool_name: str, args: dict) -> str:
+def execute_tool(tool_name: str, args: dict, country_code: str = None) -> str:
     """Executes a registered tool by name with the given arguments."""
     print(f"[tool_registry] Executing tool: {tool_name}")
     try:
         if tool_name == "search_jobs":
-            result = search_jobs(args["query"], args["location"], args["count"])
+            result = search_jobs(
+                args["query"],
+                args["location"],
+                args["count"],
+                country_code=country_code,
+            )
             return json.dumps(result)
         elif tool_name == "scrape_job":
             result = scrape_job(args["url"])

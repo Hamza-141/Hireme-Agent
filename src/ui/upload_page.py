@@ -4,9 +4,9 @@ from src.ui.components import show_header, show_error, show_cv_summary
 def show_upload_page():
     show_header()
     show_error()
-    
+
     uploaded_file = st.file_uploader("Upload your CV", type=["pdf", "docx"])
-    
+
     if uploaded_file is not None:
         if st.session_state.get("last_file") != uploaded_file.name:
             with st.spinner("Parsing CV..."):
@@ -21,20 +21,36 @@ def show_upload_page():
 
     if st.session_state.get("cv_data"):
         show_cv_summary(st.session_state["cv_data"])
-        
+
     col1, col2 = st.columns(2)
     with col1:
-        loc = st.text_input("Job Location", value=st.session_state.get("location", ""))
+        loc = st.text_input(
+            "Job Location",
+            value=st.session_state.get("location", ""),
+            placeholder="e.g. London, New York, Mumbai, Sydney",
+        )
         st.session_state["location"] = loc
+
+        # Real-time location support warning
+        if loc.strip():
+            from src.agents.hire_agent import get_location_warning
+            warning = get_location_warning(loc)
+            if warning:
+                st.warning(warning)
+
     with col2:
-        cnt = st.selectbox("Number of Jobs", options=[3, 5, 10], index=[3, 5, 10].index(st.session_state.get("count", 3)))
+        cnt = st.selectbox(
+            "Number of Jobs",
+            options=[3, 5, 10],
+            index=[3, 5, 10].index(st.session_state.get("count", 3))
+        )
         st.session_state["count"] = cnt
-        
+
     has_cv = st.session_state.get("cv_data") is not None
     has_loc = bool(st.session_state.get("location", "").strip())
-    
+
     can_submit = has_cv and has_loc
-    
+
     if st.button("Find Jobs and Write Cover Letters", type="primary", use_container_width=True, disabled=not can_submit):
         with st.spinner("Finding matches and writing cover letters. This will take 30 to 60 seconds..."):
             try:
@@ -46,7 +62,7 @@ def show_upload_page():
             except Exception as e:
                 st.session_state["error"] = f"An error occurred: {str(e)}"
                 st.rerun()
-                
+
     if not can_submit:
         missing = []
         if not has_cv:
@@ -54,3 +70,4 @@ def show_upload_page():
         if not has_loc:
             missing.append("enter a location")
         st.caption(f"Please {' and '.join(missing)} to continue.")
+

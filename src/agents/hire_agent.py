@@ -4,6 +4,7 @@ from openai import OpenAI
 from src.config.settings import GROQ_API_KEY
 from src.memory.cv_store import get_cv
 from src.tools.tool_registry import TOOL_DEFINITIONS, execute_tool
+from src.tools.location_resolver import resolve_location
 
 # ── Groq / Llama client ───────────────────────────────────────────────────────
 
@@ -25,6 +26,10 @@ def run_agent(location: str, count: int) -> list:
     cv_data = get_cv()
     if not cv_data:
         raise ValueError("No CV has been loaded yet.")
+
+    # Resolve Adzuna country from the location string up-front
+    country_code, location_warning = resolve_location(location)
+    print(f"[hire_agent] Resolved country_code={country_code!r} for location={location!r}")
 
     system_prompt = """You are a job hunting assistant. Follow this exact sequence:
 
@@ -74,7 +79,8 @@ Candidate Details:
 - Summary: {cv_data.get('summary')}
 
 Search Requirements:
-- Location: {location}
+- Location (where param): {location}
+- Adzuna country code to use: {country_code}
 - Number of results to request: {count}
 
 Instruction:
@@ -134,7 +140,7 @@ After getting results, write cover letters using the description field — do NO
                 except json.JSONDecodeError:
                     args_dict = {}
 
-                result_str = execute_tool(tool_name, args_dict)
+                result_str = execute_tool(tool_name, args_dict, country_code=country_code)
 
                 messages.append({
                     "role": "tool",
@@ -160,5 +166,11 @@ After getting results, write cover letters using the description field — do NO
     raise RuntimeError(
         f"Agent loop exceeded maximum iterations ({max_iterations}) without returning a final response."
     )
+
+
+def get_location_warning(location: str) -> str | None:
+    """Convenience wrapper so the UI can show a warning before running the agent."""
+    _, warning = resolve_location(location)
+    return warning
 
 

@@ -1,11 +1,23 @@
 import requests
 from src.config.settings import ADZUNA_APP_ID, ADZUNA_APP_KEY, ADZUNA_COUNTRY
+from src.tools.location_resolver import resolve_location
 
 
-def search_jobs(query: str, location: str, count: int) -> list:
-    """Search Adzuna API for jobs."""
+def search_jobs(query: str, location: str, count: int, country_code: str = None) -> list:
+    """Search Adzuna API for jobs.
+
+    Args:
+        query: Job title / keywords to search.
+        location: City or region (passed as `where` to Adzuna).
+        count: Number of results to request.
+        country_code: Two-letter Adzuna country code (auto-resolved from location if not given).
+    """
     try:
-        url = f"https://api.adzuna.com/v1/api/jobs/{ADZUNA_COUNTRY}/search/1"
+        # Resolve country from location if not explicitly provided
+        if not country_code:
+            country_code, _ = resolve_location(location)
+
+        url = f"https://api.adzuna.com/v1/api/jobs/{country_code}/search/1"
         params = {
             "app_id": ADZUNA_APP_ID,
             "app_key": ADZUNA_APP_KEY,
@@ -62,6 +74,12 @@ def search_jobs(query: str, location: str, count: int) -> list:
             created_raw = item.get("created", "")
             created = created_raw[:10] if created_raw else "Unknown"
 
+            redirect_url = item.get("redirect_url", "").strip()
+
+            # Skip jobs with no redirect URL — they lead to dead pages
+            if not redirect_url:
+                continue
+
             job_listings.append({
                 "id": str(item.get("id", "")),
                 "title": item.get("title", ""),
@@ -71,7 +89,7 @@ def search_jobs(query: str, location: str, count: int) -> list:
                 "contract": contract,
                 "posted": created,
                 "description": description,
-                "url": item.get("redirect_url", ""),
+                "url": redirect_url,
             })
 
         print(f"[job_search] Found {len(job_listings)} jobs.")
