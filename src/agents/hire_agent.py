@@ -5,9 +5,10 @@ from src.config.settings import GROQ_API_KEY
 from src.memory.cv_store import get_cv
 from src.tools.tool_registry import TOOL_DEFINITIONS, execute_tool
 
-# ── OpenAI client ────────────────────────────────────────────────────────────
+# ── Groq / Llama client ───────────────────────────────────────────────────────
 
 _client = OpenAI(api_key=GROQ_API_KEY, base_url="https://api.groq.com/openai/v1")
+
 
 def _strip_markdown(text: str) -> str:
     """Remove markdown code fences that the LLM may wrap around JSON."""
@@ -17,39 +18,47 @@ def _strip_markdown(text: str) -> str:
         return match.group(1).strip()
     return text.strip()
 
+
 def run_agent(location: str, count: int) -> list:
     """Run the job hunting agent loop."""
-    
+
     cv_data = get_cv()
     if not cv_data:
         raise ValueError("No CV has been loaded yet.")
-        
-    system_prompt = """You are a job hunting assistant. You must always follow this exact sequence:
-1. Look at the candidate's preferred roles and skills and pick ONE single concise job title that best represents them.
-   This will be used as the search query.
-   The query must be short and specific, exactly how a job title appears on a job board.
-   Good examples: "AI Engineer", "Data Analyst", "Backend Developer"
-   Bad examples: "AI Engineer, Software Engineer, Backend Developer" or "experienced python developer with ml skills"
-   This is a hard rule. Never pass multiple roles or a long string as the search query.
-2. Call search_jobs once using that single concise job title as the query and the location and count provided by the user.
-3. Pick the top 3 jobs from the results.
-4. Call scrape_job for each of those 3 jobs to fetch their details.
-5. Write a tailored cover letter for each job after fetching details.
+
+    system_prompt = """You are a job hunting assistant. Follow this exact sequence:
+
+1. Look at the candidate's preferred roles and skills. Pick ONE single concise job title
+   that best represents them. Use it as the search query.
+   - Good: "AI Engineer", "Data Analyst", "Backend Developer"
+   - Bad: "AI Engineer, Software Engineer" or "experienced python developer with ml skills"
+   This is a hard rule. ONE job title only.
+
+2. Call search_jobs ONCE using that single job title, the provided location, and count.
+
+3. From the results, select the top jobs (up to the count requested).
+
+4. For each job, write a tailored cover letter using:
+   - The job's title, company, location, salary, and description fields from the search results.
+   - You do NOT need to call scrape_job. The description from search_jobs is sufficient.
 
 Cover letter rules:
-- Address the specific company and job title by name
-- Only use skills and experience actually present in the CV
-- Write exactly 3 paragraphs: opening, value pitch, closing
-- Use a professional but warm tone
-- Never fabricate anything not in the CV
-- Never use generic filler phrases like "I am writing to apply"
+- Address the specific company and job title by name.
+- Only use skills and experience actually present in the CV.
+- Write exactly 3 paragraphs: opening, value pitch, closing.
+- Use a professional but warm tone.
+- Never fabricate anything not in the CV.
+- Never use generic filler phrases like "I am writing to apply".
 
-Return your final response as a raw JSON array only, with no markdown and no explanation, where each item contains:
+Return your final response as a raw JSON array ONLY — no markdown, no explanation.
+Each item in the array must contain:
 {
   "job_title": "...",
   "company": "...",
   "location": "...",
   "salary": "...",
+  "contract": "...",
+  "posted": "...",
   "job_url": "...",
   "cover_letter": "..."
 }
@@ -69,7 +78,8 @@ Search Requirements:
 - Number of results to request: {count}
 
 Instruction:
-Begin by picking ONE concise search query (a single job title) and call search_jobs immediately.
+Pick ONE concise search query (a single job title) and call search_jobs immediately.
+After getting results, write cover letters using the description field — do NOT call scrape_job.
 """
 
     messages = [
@@ -78,10 +88,10 @@ Begin by picking ONE concise search query (a single job title) and call search_j
     ]
 
     max_iterations = 15
-    
+
     for i in range(max_iterations):
         print(f"[hire_agent] Starting iteration {i+1}/{max_iterations}")
-        
+
         response = _client.chat.completions.create(
             model="llama-3.3-70b-versatile",
             messages=messages,
@@ -89,11 +99,10 @@ Begin by picking ONE concise search query (a single job title) and call search_j
             tool_choice="auto",
             temperature=0.3
         )
-        
+
         message = response.choices[0].message
-        
+
         # Append the assistant's message to the history
-        # We must include tool_calls if they exist
         assistant_message = {"role": "assistant"}
         if message.content is not None:
             assistant_message["content"] = message.content
@@ -108,35 +117,34 @@ Begin by picking ONE concise search query (a single job title) and call search_j
                         "arguments": tc.function.arguments
                     }
                 })
-        
-        # If there's neither content nor tool calls, it's an empty response (edge case)
+
         if "content" not in assistant_message and "tool_calls" not in assistant_message:
-             assistant_message["content"] = ""
-             
+            assistant_message["content"] = ""
+
         messages.append(assistant_message)
-        
+
         if message.tool_calls:
             for tool_call in message.tool_calls:
                 tool_name = tool_call.function.name
                 arguments = tool_call.function.arguments
                 print(f"[hire_agent] Model called tool: {tool_name}")
-                
+
                 try:
                     args_dict = json.loads(arguments)
                 except json.JSONDecodeError:
                     args_dict = {}
-                    
+
                 result_str = execute_tool(tool_name, args_dict)
-                
+
                 messages.append({
                     "role": "tool",
                     "tool_call_id": tool_call.id,
                     "name": tool_name,
                     "content": result_str
                 })
-            continue # Continue to the next iteration to send tool results
+            continue  # Continue to the next iteration to send tool results
         else:
-            # No tool calls, this must be the final response
+            # No tool calls — this is the final response
             final_content = message.content or ""
             cleaned_content = _strip_markdown(final_content)
             try:
@@ -144,10 +152,13 @@ Begin by picking ONE concise search query (a single job title) and call search_j
                 print("[hire_agent] Successfully generated final response.")
                 return results_list
             except json.JSONDecodeError as e:
-                # If parsing fails, we could potentially raise or retry, 
-                # but the instructions say to strip formatting, parse JSON, and return the list.
-                # If it's not valid JSON, we will raise an error.
-                raise ValueError(f"Failed to parse final response as JSON. Error: {e}\nRaw output: {cleaned_content}")
+                raise ValueError(
+                    f"Failed to parse final response as JSON. Error: {e}\n"
+                    f"Raw output: {cleaned_content}"
+                )
 
-    # If the loop finishes without returning
-    raise RuntimeError(f"Agent loop exceeded maximum iterations ({max_iterations}) without returning a final response.")
+    raise RuntimeError(
+        f"Agent loop exceeded maximum iterations ({max_iterations}) without returning a final response."
+    )
+
+
