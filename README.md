@@ -1,7 +1,6 @@
 # HireMe Agent
 
-An AI-powered job search assistant that parses your CV and finds matching opportunities.
-
+HireMe is an AI-powered job matching tool that helps users discover relevant job listings by combining the Adzuna Jobs API with Google's Generative AI. Built with Streamlit during an AI Agents hackathon, it takes a user's skills, interests, or resume details and surfaces tailored job matches with AI-generated insights on fit and relevance cutting through generic keyword search to give more personalized recommendations.
 ## Setup
 
 ### 1. Install Dependencies
