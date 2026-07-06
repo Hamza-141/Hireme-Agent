@@ -55,6 +55,7 @@ def search_jobs(query: str, location: str, count: int, country_code: str = None)
             # Description — give the agent a full 1000 chars so it can write
             # a proper cover letter without needing to scrape the employer site.
             description = item.get("description", "")
+            print(f"[job_search] Raw description length: {len(description)} characters")
             if len(description) > 1000:
                 description = description[:997] + "..."
 
