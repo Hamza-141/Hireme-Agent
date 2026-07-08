@@ -1,5 +1,6 @@
 import requests
 import re
+from bs4 import BeautifulSoup
 
 def scrape_job(url: str) -> str:
     """Fetch job listing URL and return cleaned text."""
@@ -11,8 +12,11 @@ def scrape_job(url: str) -> str:
         response = requests.get(url, headers=headers, timeout=10)
         response.raise_for_status()
         
-        # Strip HTML tags
-        text = re.sub(r'<[^>]+>', ' ', response.text)
+        # Extract only the job description section (adp-body), not the whole page
+
+        soup = BeautifulSoup(response.text, "html.parser")
+        box = soup.find("section", class_="adp-body")
+        text = box.get_text(separator=" ", strip=True) if box else ""
         
         # Collapse whitespace
         text = re.sub(r'\s+', ' ', text).strip()
