@@ -1,31 +1,103 @@
 # PLAN.md — HireMe Agent
 
-Last updated: July 07, 2026
+**Last Updated:** Current Session (July 2026)
 
-## Current Goal
-HireMe Agent is an AI-powered job matching tool: a user uploads their CV, the app parses it, searches live job listings via Adzuna, and generates tailored cover letters using an LLM. It works end-to-end from a hackathon build. Current stage: cleaning up and hardening the existing code before using it as a portfolio/interview project — no new features have been agreed on yet.
+**Source of Truth:** Active Project Plan & Agent Handoff Reference
 
-## Architecture / Key Decisions
-- **UI**: Streamlit, two "pages" controlled by `st.session_state["stage"]` (`upload` and `results`), no real routing library.
-- **LLM**: Groq API running `llama-3.3-70b-versatile`, accessed through the OpenAI Python SDK pointed at Groq's base URL. Used for both CV parsing (`cv_parser.py`) and the job-hunting agent loop (`hire_agent.py`).
-- **Job data**: Adzuna API (`job_search.py`), limited to 12 supported countries. `location_resolver.py` maps free-text locations to Adzuna country codes and falls back to `gb` with a UI warning if the location isn't supported.
-- **CV storage**: `src/memory/cv_store.py` holds the parsed CV in a plain Python module-level global variable (not `st.session_state`, not a database).
-- **Agent tool loop**: `hire_agent.py` uses OpenAI-style function calling (`tool_choice="auto"`, max 15 iterations). Two tools are registered (`search_jobs`, `scrape_job`), but the system prompt explicitly tells the model to skip `scrape_job` and use the description field from `search_jobs` results instead.
-- **File parsing**: Only PDF (via PyMuPDF/`fitz`) and DOCX (via `python-docx`) are supported; files are extracted through a temp file that's deleted afterward.
-- **Hosting**: Streamlit Community Cloud, secrets read via `st.secrets` first, falling back to `.env` locally.
+---
 
-## Active Tasks
-- [ ] Decide whether to keep `scrape_job` (dead code — registered as a tool but never called) or remove it, since it adds confusion without being used
-- [ ] Move CV storage from a module-level global to `st.session_state`, since a global variable is shared across *all* users on a deployed app, not per-user
-- [ ] Fix `README.md`: it documents `OPENAI_API_KEY` as required, but the app actually reads `GROQ_API_KEY` — anyone following the README setup will fail
-- [ ] Remove or explain leftover dev files not part of the actual app: `test_gemini.py`, `test_import.py` (hardcoded Windows path), `out.txt` (empty)
-- [ ] Review Adzuna's 12-country limitation and decide if the silent fallback-to-UK behavior is the right UX or needs rethinking
+## Project Purpose
 
-## Known Issues / Blockers
-- **Multi-user data bug**: `cv_store.py`'s global variable means if two people use the deployed app at the same time, one user's CV can overwrite another's. This is the most important correctness issue to fix before treating this as demo-ready for multiple simultaneous users.
-- **Dead code**: `scrape_job` / `job_scraper.py` is fully implemented and registered in `TOOL_DEFINITIONS`, but the agent is instructed never to use it. Either it should be wired in for real, or removed to avoid confusing anyone reading the code.
-- **Docs mismatch**: `README.md` and `.env` example reference `OPENAI_API_KEY`; actual code (`settings.py`) requires `GROQ_API_KEY`. This will break onboarding for anyone else trying to run the project.
-- **Repo clutter**: `test_gemini.py`, `test_import.py`, and `out.txt` look like debugging leftovers rather than part of the real app, and would look unpolished in a portfolio/interview context.
+**Core App:** AI-powered job matching tool. Upload CV → Parse → Agent loop searches live jobs (Adzuna) → Generates tailored cover letters via LLM.
 
-## Recent Changes
-- This is the first PLAN.md for the project. It was generated from a full review of the existing codebase (no prior planning conversation existed yet). Nothing has been changed in the code yet — this file just captures the current state and the issues found so we have a shared reference to work from.
+**Target Audience:** Demo-ready portfolio project for LinkedIn/interviews.
+
+**Owner Profile:** 2nd-year Software Engineering student (Pakistan). Intermediate Python, familiar with Streamlit, Flask, Django, Git.
+
+**Core Goal:** Owner must deeply understand every component well enough to explain it thoroughly in technical interviews.
+
+---
+
+## Architecture & Key Decisions
+
+- **UI Frontend:** Streamlit using `st.session_state["stage"]` (upload and results) for step-based navigation.
+- **LLM Core:** Groq API running `llama-3.3-70b-versatile` via OpenAI Python SDK wrappers. Handles parsing and agent loops.
+- **Job Data Fetching:** Adzuna API (`job_search.py`) covering 12 countries. `location_resolver.py` maps free text to codes; falls back to `gb` with a UI warning.
+- **State & Memory:** `src/memory/cv_store.py` currently holds parsed CVs in a module-level global variable (Multi-user vulnerability).
+- **Agent Logic:** `hire_agent.py` runs an OpenAI-style function calling loop (max 15 iterations).
+- **File Handling:** PyMuPDF (`fitz`) for PDFs, `python-docx` for Word files. Processes via temporary files.
+- **Hosting Deployment:** Streamlit Community Cloud with `st.secrets` falling back to local `.env`.
+
+---
+
+## Active Task: Upgrade `job_scraper.py` via BeautifulSoup
+
+**Context:** Adzuna truncates job descriptions to exactly 500 characters in the search payload. Full data lives on the `redirect_url` inside `<section class="adp-body ...">`.
+
+**Current State:** `scrape_job` is currently registered but disabled via system prompt instructions, making changes completely zero-risk to the main loop.
+
+### 10-Phase Implementation Progress
+
+- [x] **Phase 1:** Confirm baseline (500-char snippets active, tool unused)
+- [x] **Phase 2:** Add `beautifulsoup4` to `requirements.txt` and install (pip restored via force-reinstall)
+- [ ] **Phase 3 (CURRENT STEP):** Test extraction on 2–3 real Adzuna URLs using a scratch script to confirm target class reliability.
+- [ ] **Phase 4:** Create Git safety net branch/commit for `job_scraper.py`
+- [ ] **Phase 5:** Targeted file edit replacing regex tag stripping with explicit soup parsing logic:
+
+  ```python
+  from bs4 import BeautifulSoup
+  soup = BeautifulSoup(response.text, "html.parser")
+  description_box = soup.find("section", class_="adp-body")
+  text = description_box.get_text(separator=" ", strip=True)
+  ```
+
+- [ ] **Phase 6:** Isolate test `scrape_job()` outside Streamlit environment
+- [ ] **Phase 7:** Implement `NoneType` guard for external redirect edge cases to prevent `AttributeError` crashes
+- [ ] **Phase 8:** Formally decide on re-enabling tool loop logic in `hire_agent.py` system prompts (weighing latency costs)
+- [ ] **Phase 9:** Conduct end-to-end local integration testing in the Streamlit runtime
+- [ ] **Phase 10:** Deploy to Streamlit Cloud and outline validation/rollback steps
+
+---
+
+## Other Backlog Tasks & Known Issues
+
+### High Priority
+
+- **Multi-user Data Bug:** Global storage in `cv_store.py` shares CV data across all active web instances simultaneously. Must migrate to `st.session_state` before public portfolio presentation.
+
+### Documentation & Maintenance
+
+- **Config/Docs Mismatch:** `README.md` and `.env.example` wrongly reference `OPENAI_API_KEY`. The code actually looks for `GROQ_API_KEY`. Fix on an independent branch.
+- **Repository Clutter:** Delete or document standalone debugging files: `test_gemini.py`, `test_import.py` (contains hardcoded local paths), and empty `out.txt`.
+
+### Unresolved Anomalies
+
+- **Regional Search Bug:** Querying with `gb` (United Kingdom) parameters returned a Jersey City, NJ, USA job rendering an Adzuna "not available in your region" warning page. Requires future diagnosis.
+
+---
+
+## Technical Environment & Working Rules
+
+### Workspace Blueprint
+
+- **OS/Shell:** Windows, VS Code, Git Bash.
+- **Package Management:** Run execution commands safely via `python -m pip` to protect system environment links.
+- **Version Control:** Strictly one Git branch per isolated task. Clear, manual commit narratives. No auto-commit habits.
+
+### Working with the AI Agent
+
+- **Explain WHY before HOW.** Do not accept code changes without an accompanying explanation of the underlying logic.
+- **Granular Edits Only.** Targeted adjustments are preferred over complete file rewrites.
+- **Format for Scannability.** Information must remain accessible via lists, bold text, and brief technical checkpoints. Avoid massive walls of prose.
+
+---
+
+## Recommended Learning Sequence
+
+To master the codebase for interviews, review components in this sequence:
+
+1. Streamlit Session State Configuration
+2. CV File Parsing Pipeline
+3. Agent Execution Loop Architecture
+4. Tool Selection & Function Calling Framework
+5. Frontend UI Presentation Files
