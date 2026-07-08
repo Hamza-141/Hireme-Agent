@@ -101,3 +101,105 @@ To master the codebase for interviews, review components in this sequence:
 3. Agent Execution Loop Architecture
 4. Tool Selection & Function Calling Framework
 5. Frontend UI Presentation Files
+
+
+# HireMe Agent — Progress Log & Next Steps
+
+_Last updated: current session._
+
+---
+
+## CURRENT ACTIVE TASK: Upgrade `job_scraper.py` to use BeautifulSoup
+
+### Why
+
+- Adzuna API caps job descriptions at 500 characters — confirmed permanent
+  via official docs (developer.adzuna.com/docs/search), no parameter exists
+  to get more.
+- Full description exists on the Adzuna job page itself, inside
+  `<section class="adp-body ...">` — confirmed via view-source + phrase
+  search on a real job page.
+- Current `job_scraper.py` uses blunt regex that strips the ENTIRE page
+  (menus, ads, "similar jobs," region-block messages all mixed in with the
+  real description) — matches original spec, but spec had this gap.
+- `scrape_job` is currently dead code (registered in `tool_registry.py`,
+  but `hire_agent.py` explicitly tells the model not to call it) — makes
+  this upgrade zero-risk to build and test in isolation.
+
+### Progress — Phases Completed
+
+1. **Baseline confirmed** — ✅ App currently uses only the 500-char Adzuna
+   snippet; `scrape_job` unused.
+2. **BeautifulSoup added, in isolation** — ✅ `beautifulsoup4` added to
+   `requirements.txt`, installed successfully. (Had to repair a corrupted
+   local `pip` install along the way — fixed via
+   `python get-pip.py --force-reinstall`.)
+3. **Tested on real data** — ✅ Tested `soup.find("section", class_="adp-body")`
+   against 4 real, different Adzuna job URLs:
+
+   | Job | Length | Result |
+   |---|---|---|
+   | Kforce (Software Engineer) | ~3000+ chars | ✅ clean |
+   | AI Engineer (London) | 2953 chars | ✅ clean |
+   | TradingHub | 4404 chars | ✅ clean |
+   | Senior Voice AI Engineer | 1605 chars | ✅ clean |
+
+   Conclusion: `adp-body` reliably extracts the full description, well
+   above the API cap, with no junk content, across varied jobs. Approach
+   validated.
+
+   Known tradeoff, documented for interview-readiness: Adzuna's
+   `robots.txt` disallows automated access to these pages. Decision made
+   to proceed anyway for this personal/learning project (low request
+   volume, not deployed at scale) — deliberate, explainable choice, not
+   an oversight.
+
+### Next Steps (not started yet)
+
+4. **Git safety net** — commit/branch current working `job_scraper.py`
+   before editing it, so it can be instantly reverted. *(next up)*
+5. Make the targeted edit — replace only this one line in
+   `src/tools/job_scraper.py`:
+   ```python
+   text = re.sub(r'<[^>]+>', ' ', response.text)
+   ```
+   with:
+   ```python
+   from bs4 import BeautifulSoup
+   soup = BeautifulSoup(response.text, "html.parser")
+   description_box = soup.find("section", class_="adp-body")
+   text = description_box.get_text(separator=" ", strip=True)
+   ```
+   Everything else in the file stays unchanged.
+6. Test `scrape_job()` in isolation (outside Streamlit) on a real URL.
+7. Test edge cases — a URL where `adp-body` doesn't exist. `description_box`
+   will be `None` in that case — must add a guard (e.g. `if description_box:`)
+   or it will crash with `AttributeError`. Not written yet.
+8. Decide separately whether to re-enable `scrape_job` inside
+   `hire_agent.py`'s agent loop (currently explicitly disabled). Adds
+   latency (extra request per job) — distinct decision from "does the
+   scraper work."
+9. Full end-to-end test in the real Streamlit app.
+10. Confirm Git rollback steps in case of a live issue after deploying.
+
+---
+
+## Other Known Issues (tracked, not yet started)
+
+- **Multi-user bug:** CV data stored in a module-level global
+  (`src/memory/cv_store.py`) instead of Streamlit session state. Will break
+  if multiple users use the deployed app simultaneously.
+- **README/config mismatch:** `README.md` references `OPENAI_API_KEY`, but
+  the app requires `GROQ_API_KEY` (see `src/config/settings.py`). Low-risk,
+  independent fix — safe to do on its own branch.
+- **Repo clutter:** `test_gemini.py`, `test_import.py` (hardcoded local
+  Windows path), `out.txt` — candidates for cleanup.
+- **Unresolved anomaly:** searching with `gb` (UK) location returned a job
+  in Jersey City, NJ, USA, marked "not available in your region." Root
+  cause not yet investigated.
+
+## Sequencing Notes
+
+- Session-state bug and scraper upgrade both touch files near
+  `hire_agent.py` — sequence them, don't parallelize.
+- README fix and file cleanup can be done independently, in parallel.
